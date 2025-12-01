@@ -320,7 +320,8 @@ def extract_metrics_from_table(
     header: List[str],
     rows: List[List[str]],
     table_format: str = "auto",
-    model_name: Optional[str] = None
+    model_name: Optional[str] = None,
+    model_column_index: Optional[int] = None
 ) -> List[Dict[str, Any]]:
     """
     Extract metrics from parsed table data.
@@ -362,8 +363,8 @@ def extract_metrics_from_table(
     if table_format == "rows":
         # Benchmarks are in rows, scores in columns
         # Try to identify the main model column if model_name is provided
-        target_column = None
-        if model_name:
+        target_column = model_column_index
+        if target_column is None and model_name:
             target_column = find_main_model_column(header, model_name)
 
         for row in rows:
@@ -491,7 +492,8 @@ def extract_evaluations_from_readme(
     dataset_name: str = "Benchmarks",
     dataset_type: str = "benchmark",
     model_name_override: Optional[str] = None,
-    table_index: Optional[int] = None
+    table_index: Optional[int] = None,
+    model_column_index: Optional[int] = None
 ) -> Optional[List[Dict[str, Any]]]:
     """
     Extract evaluation results from a model's README.
@@ -564,7 +566,12 @@ def extract_evaluations_from_readme(
         for table in tables_to_process:
             header = table.get("headers", [])
             rows = table.get("rows", [])
-            metrics = extract_metrics_from_table(header, rows, model_name=model_name)
+            metrics = extract_metrics_from_table(
+                header,
+                rows,
+                model_name=model_name,
+                model_column_index=model_column_index
+            )
             all_metrics.extend(metrics)
 
         if not all_metrics:
@@ -765,9 +772,7 @@ def inspect_tables(repo_id: str) -> None:
             print("\nNo evaluation tables detected.")
         else:
             print("\nSuggested next step:")
-            print(f'  uv run scripts/evaluation_manager.py extract-readme --repo-id "{repo_id}" --table <table-number> --dry-run')
-            print("If your model column/row is not an exact match, add:")
-            print('  --model-name-override "<column header or model name from table>"')
+            print(f'  uv run scripts/evaluation_manager.py extract-readme --repo-id "{repo_id}" --table <table-number> [--model-column-index <column-index>]')
 
         print(f"\n{'='*70}\n")
 
@@ -1158,16 +1163,18 @@ def main():
             Typical workflows:
               - Inspect tables first:
                   uv run scripts/evaluation_manager.py inspect-tables --repo-id <model>
-              - Extract from README (dry-run):
-                  uv run scripts/evaluation_manager.py extract-readme --repo-id <model> --dry-run
+              - Extract from README (prints YAML by default):
+                  uv run scripts/evaluation_manager.py extract-readme --repo-id <model> --table N
+              - Apply changes:
+                  uv run scripts/evaluation_manager.py extract-readme --repo-id <model> --table N --apply
               - Import from Artificial Analysis:
                   AA_API_KEY=... uv run scripts/evaluation_manager.py import-aa --creator-slug org --model-name slug --repo-id <model>
 
             Tips:
-              - Use --dry-run to preview YAML before pushing.
+              - YAML is printed by default; use --apply or --create-pr to write changes.
               - Set HF_TOKEN (and AA_API_KEY for import-aa); .env is loaded automatically if python-dotenv is installed.
               - When multiple tables exist, run inspect-tables then select with --table N.
-              - To apply changes (push or PR), rerun extract-readme without --dry-run (optionally with --create-pr).
+              - To apply changes (push or PR), rerun extract-readme with --apply or --create-pr.
             """
         ),
     )
@@ -1180,28 +1187,34 @@ def main():
         "extract-readme",
         help="Extract evaluation tables from model README",
         formatter_class=argparse.RawTextHelpFormatter,
-        description="Parse README tables into model-index YAML. Start with inspect-tables, then re-run with --table and --dry-run.",
+        description="Parse README tables into model-index YAML. Default behavior prints YAML; use --apply/--create-pr to write changes.",
         epilog=dedent(
             """\
             Examples:
-              uv run scripts/evaluation_manager.py extract-readme --repo-id username/model --dry-run
-              uv run scripts/evaluation_manager.py extract-readme --repo-id username/model --table 2 --model-name-override \"**Model 7B**\" --dry-run
+              uv run scripts/evaluation_manager.py extract-readme --repo-id username/model
+              uv run scripts/evaluation_manager.py extract-readme --repo-id username/model --table 2 --model-column-index 3
+              uv run scripts/evaluation_manager.py extract-readme --repo-id username/model --table 2 --model-name-override \"**Model 7B**\"  # exact header text
               uv run scripts/evaluation_manager.py extract-readme --repo-id username/model --table 2 --create-pr
 
             Apply changes:
-              - After validating the dry run, rerun without --dry-run to push.
-              - Add --create-pr to submit a pull request instead of a direct push.
+              - Default: prints YAML to stdout (no writes).
+              - Add --apply to push directly, or --create-pr to open a PR.
+            Model selection:
+              - Preferred: --model-column-index <header index shown by inspect-tables>
+              - If using --model-name-override, copy the column header text exactly.
             """
         ),
     )
     extract_parser.add_argument("--repo-id", type=str, required=True, help="HF repository ID")
     extract_parser.add_argument("--table", type=int, help="Table number (1-indexed, from inspect-tables output)")
-    extract_parser.add_argument("--model-name-override", type=str, help="Column header for comparison/transpose tables")
-    extract_parser.add_argument("--task-type", type=str, default="text-generation", help="Task type")
+    extract_parser.add_argument("--model-column-index", type=int, help="Preferred: column index from inspect-tables output (exact selection)")
+    extract_parser.add_argument("--model-name-override", type=str, help="Exact column header/model name for comparison/transpose tables (when index is not used)")
+    extract_parser.add_argument("--task-type", type=str, default="text-generation", help="Sets model-index task.type (e.g., text-generation, summarization)")
     extract_parser.add_argument("--dataset-name", type=str, default="Benchmarks", help="Dataset name")
     extract_parser.add_argument("--dataset-type", type=str, default="benchmark", help="Dataset type")
     extract_parser.add_argument("--create-pr", action="store_true", help="Create PR instead of direct push")
-    extract_parser.add_argument("--dry-run", action="store_true", help="Preview YAML without updating")
+    extract_parser.add_argument("--apply", action="store_true", help="Apply changes (default is to print YAML only)")
+    extract_parser.add_argument("--dry-run", action="store_true", help="Preview YAML without updating (default)")
 
     # Import from AA command
     aa_parser = subparsers.add_parser(
@@ -1250,11 +1263,11 @@ def main():
         epilog="""
 Workflow:
   1. inspect-tables     → see table structure, columns, and table numbers
-  2. extract-readme     → run with --table N (from step 1) and --dry-run to preview YAML
-  3. apply changes      → rerun extract-readme without --dry-run when satisfied (optionally with --create-pr)
+  2. extract-readme     → run with --table N (from step 1); YAML prints by default
+  3. apply changes      → rerun extract-readme with --apply or --create-pr
 
 Reminder:
-  - If your model column/row is not an exact match, add --model-name-override "<column header/model name from table>"
+  - Preferred: use --model-column-index <index>. If needed, use --model-name-override with the exact column header text.
 """
     )
     inspect_parser.add_argument("--repo-id", type=str, required=True, help="HF repository ID")
@@ -1291,23 +1304,29 @@ Reminder:
                 dataset_name=args.dataset_name,
                 dataset_type=args.dataset_type,
                 model_name_override=args.model_name_override,
-                table_index=args.table
+                table_index=args.table,
+                model_column_index=args.model_column_index
             )
 
             if not results:
                 print("No evaluations extracted")
                 return
 
-            if args.dry_run:
-                yaml = require_yaml()
-                print("\nPreview of extracted evaluations:")
-                print(
-                    yaml.dump(
-                        {"model-index": [{"name": args.repo_id.split('/')[-1], "results": results}]},
-                        sort_keys=False
-                    )
+            apply_changes = args.apply or args.create_pr
+
+            # Default behavior: print YAML (dry-run)
+            yaml = require_yaml()
+            print("\nExtracted evaluations (YAML):")
+            print(
+                yaml.dump(
+                    {"model-index": [{"name": args.repo_id.split('/')[-1], "results": results}]},
+                    sort_keys=False
                 )
-            else:
+            )
+
+            if apply_changes:
+                if args.model_name_override and args.model_column_index is not None:
+                    print("Note: --model-column-index takes precedence over --model-name-override.")
                 update_model_card_with_evaluations(
                     repo_id=args.repo_id,
                     results=results,

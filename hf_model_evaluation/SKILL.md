@@ -51,10 +51,11 @@ uv run scripts/evaluation_manager.py inspect-tables --help
 uv run scripts/evaluation_manager.py extract-readme --help
 ```
 Key workflow (matches CLI help):
+
 1) `get-prs` → check for existing open PRs first
-2) `inspect-tables` → find table numbers/columns
-3) `extract-readme --table N --dry-run` → preview YAML
-4) rerun without `--dry-run` to apply (add `--create-pr` to open a PR)
+2) `inspect-tables` → find table numbers/columns  
+3) `extract-readme --table N` → prints YAML by default  
+4) add `--apply` (push) or `--create-pr` to write changes
 
 # Core Capabilities
 
@@ -63,8 +64,9 @@ Key workflow (matches CLI help):
 - **Parse Markdown Tables**: Accurate parsing using markdown-it-py (ignores code blocks and examples)
 - **Table Selection**: Use `--table N` to extract from a specific table (required when multiple tables exist)
 - **Format Detection**: Recognize common formats (benchmarks as rows, columns, or comparison tables with multiple models)
-- **Column Matching**: Automatically identify model columns/rows, with `--model-name-override` when your model name is only a partial match
+- **Column Matching**: Automatically identify model columns/rows; prefer `--model-column-index` (index from inspect output). Use `--model-name-override` only with exact column header text.
 - **YAML Generation**: Convert selected table to model-index YAML format
+- **Task Typing**: `--task-type` sets the `task.type` field in model-index output (e.g., `text-generation`, `summarization`)
 
 ## 2. Import from Artificial Analysis
 - **API Integration**: Fetch benchmark scores directly from Artificial Analysis
@@ -103,23 +105,28 @@ Recommended flow (matches `--help`):
 # 1) Inspect tables to get table numbers and column hints
 uv run scripts/evaluation_manager.py inspect-tables --repo-id "username/model"
 
-# 2) Extract a specific table, preview YAML
+# 2) Extract a specific table (prints YAML by default)
 uv run scripts/evaluation_manager.py extract-readme \
   --repo-id "username/model" \
   --table 1 \
-  --dry-run \
-  [--model-name-override "<column header/model name>"]
+  [--model-column-index <column index shown by inspect-tables>] \
+  [--model-name-override "<column header/model name>"]  # use exact header text if you can't use the index
 
 # 3) Apply changes (push or PR)
 uv run scripts/evaluation_manager.py extract-readme \
   --repo-id "username/model" \
   --table 1 \
-  --create-pr   # omit to push directly
+  --apply       # push directly
+# or
+uv run scripts/evaluation_manager.py extract-readme \
+  --repo-id "username/model" \
+  --table 1 \
+  --create-pr   # open a PR
 ```
 
 Validation checklist:
-- Always run with `--dry-run` first and compare against the README table.
-- Use `--model-name-override` when your model column/row is not an exact match.
+- YAML is printed by default; compare against the README table before applying.
+- Prefer `--model-column-index`; if using `--model-name-override`, the column header text must be exact.
 - For transposed tables (models as rows), ensure only one row is extracted.
 
 ### Method 2: Import from Artificial Analysis
@@ -206,11 +213,11 @@ uv run scripts/evaluation_manager.py inspect-tables --repo-id "username/model-na
 uv run scripts/evaluation_manager.py extract-readme \
   --repo-id "username/model-name" \
   --table N \
-  [--model-name-override "Column Header or Model Name"] \
+  [--model-column-index N] \
+  [--model-name-override "Exact Column Header or Model Name"] \
   [--task-type "text-generation"] \
   [--dataset-name "Custom Benchmarks"] \
-  [--dry-run] \
-  [--create-pr]
+  [--apply | --create-pr]
 ```
 
 **Import from Artificial Analysis:**
@@ -292,7 +299,7 @@ WARNING: Do not use markdown formatting in the model name. Use the exact name fr
 1. **Check for existing PRs first**: Run `get-prs` before creating any new PR to avoid duplicates
 2. **Always start with `inspect-tables`**: See table structure and get the correct extraction command
 3. **Use `--help` for guidance**: Run `inspect-tables --help` to see the complete workflow
-4. **Use `--dry-run` first**: Preview YAML output before applying changes
+4. **Preview first**: Default behavior prints YAML; review it before using `--apply` or `--create-pr`
 5. **Verify extracted values**: Compare YAML output against the README table manually
 6. **Use `--table N` for multi-table READMEs**: Required when multiple evaluation tables exist
 7. **Use `--model-name-override` for comparison tables**: Copy the exact column header from `inspect-tables` output
